@@ -92,6 +92,7 @@ class LabObservatory:
         self.tuner = MABTuner()
         # Telemetry metrics collection (Prometheus / OTEL fallback)
         self.metrics_db = []
+        self.candidate_guardrails = []
 
     async def get_health_report(self):
         """Retrieves the latest Kaizen report from the factory experiments."""
@@ -109,7 +110,8 @@ class LabObservatory:
             "status": latest_kaizen_status,
             "platform": "Silicon Oracle v3.2.0",
             "optimal_weights": recent_weights,
-            "telemetry_events": len(self.metrics_db)
+            "telemetry_events": len(self.metrics_db),
+            "candidate_guardrails_count": len(self.candidate_guardrails),
         }
 
     def record_telemetry(self, event: dict):
@@ -183,13 +185,38 @@ async def register_scan_endpoint(report: dict):
         "cost_ratio": report.get("cost_ratio", 0.2)
     })
     if report.get("error_trace") or report.get("verdict") == "REJECTED":
-        insight["candidate_guardrail"] = {
+        reason_str = str(report.get("error_trace") or report.get("reasoning") or "scan_rejection")[:120]
+        cand = {
             "rule_type": "regex",
             "lifecycle_state": "CANDIDATE",
             "shadow_hours_required": 72,
-            "source_reason": str(report.get("error_trace") or report.get("reasoning") or "scan_rejection")[:120],
+            "source_reason": reason_str,
         }
+        try:
+            from core.guardrail_manager import GuardrailManager
+            gm = GuardrailManager()
+            rule = gm.propose_candidate_guardrail(
+                trace_id=report.get("trace_id", "lab-scan"),
+                error_description=reason_str,
+                proposed_pattern=reason_str[:40],
+                description=f"Auto-synthesized by RAE-Lab from scan rejection: {reason_str}",
+            )
+            cand["rule_id"] = rule.id
+        except Exception:
+            pass
+        observatory.candidate_guardrails.append(cand)
+        insight["candidate_guardrail"] = cand
     return insight
+
+@app.get("/api/mab/weights")
+async def get_mab_weights_endpoint():
+    """Returns live MAB router weights for CostAwareRouter."""
+    return observatory.tuner.optimize_router_weights(observatory.metrics_db[-20:])
+
+@app.get("/api/guardrails/candidates")
+async def get_candidate_guardrails_endpoint():
+    """Returns synthesized candidate guardrails from RAE-Lab."""
+    return observatory.candidate_guardrails
 
 @app.get("/v2/lab/insights")
 async def get_lab_insights_endpoint():
@@ -202,4 +229,5 @@ def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
