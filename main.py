@@ -23,3 +23,15 @@ async def run_experiment(proposal_id: str):
 @app.post("/lab/analyze/failures")
 async def analyze_failures(failures: List[FailureLearningRecord]):
     return hyp_engine.generate_from_failures(failures)
+
+@app.get("/v2/lab/insights")
+async def get_lab_insights(project: str = "RAE-Suite", limit: int = 10):
+    from metrics_aggregator import get_lab_insights_endpoint
+    return await get_lab_insights_endpoint()
+
+@app.post("/api/scan")
+async def register_scan(report: dict):
+    from metrics_aggregator import register_scan_endpoint
+    return await register_scan_endpoint(report)
+
+
