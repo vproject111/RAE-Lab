@@ -182,7 +182,19 @@ async def register_scan_endpoint(report: dict):
         "latency_ratio": report.get("latency_ratio", 0.3),
         "cost_ratio": report.get("cost_ratio", 0.2)
     })
+    if report.get("error_trace") or report.get("verdict") == "REJECTED":
+        insight["candidate_guardrail"] = {
+            "rule_type": "regex",
+            "lifecycle_state": "CANDIDATE",
+            "shadow_hours_required": 72,
+            "source_reason": str(report.get("error_trace") or report.get("reasoning") or "scan_rejection")[:120],
+        }
     return insight
+
+@app.get("/v2/lab/insights")
+async def get_lab_insights_endpoint():
+    """Returns the unified RAE-Lab Kaizen health report and MAB router weights."""
+    return await observatory.get_health_report()
 
 @app.get("/health")
 def health():
@@ -190,3 +202,4 @@ def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
